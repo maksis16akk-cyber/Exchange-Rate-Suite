@@ -1,0 +1,154 @@
+// exchange.cs - Курсы валют на C# Windows Forms
+// Атрибуция: Данные предоставлены Exchange Rate API
+using System;
+using System.Drawing;
+using System.Net.Http;
+using System.Threading.Tasks;
+using System.Windows.Forms;
+using Newtonsoft.Json.Linq;
+
+namespace ExchangeRatesApp
+{
+    public class MainForm : Form
+    {
+        private DataGridView ratesGrid;
+        private ComboBox baseCombo;
+        private TextBox amountBox, resultBox;
+        private ComboBox fromBox, toBox;
+        private Label statusLabel;
+        private Button convertBtn, refreshBtn;
+        private JObject currentRates;
+        private string currentBase = "USD";
+        private readonly string apiUrl = "https://open.er-api.com/v6/latest/";
+        
+        public MainForm()
+        {
+            Text = "💱 Курсы валют онлайн";
+            Size = new Size(900, 600);
+            StartPosition = FormStartPosition.CenterScreen;
+            InitializeUI();
+            LoadRates();
+        }
+        
+        private void InitializeUI()
+        {
+            // Верхняя панель
+            var topPanel = new FlowLayoutPanel { Dock = DockStyle.Top, Padding = new Padding(5), Height = 45 };
+            topPanel.Controls.Add(new Label { Text = "Базовая валюта:", AutoSize = true });
+            baseCombo = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 80 };
+            baseCombo.Items.AddRange(new[] { "USD", "EUR", "GBP", "JPY", "CNY", "RUB", "BTC" });
+            baseCombo.SelectedIndex = 0;
+            baseCombo.SelectedIndexChanged += (s, e) => LoadRates();
+            topPanel.Controls.Add(baseCombo);
+            refreshBtn = new Button { Text = "🔄 Обновить" };
+            refreshBtn.Click += (s, e) => LoadRates();
+            topPanel.Controls.Add(refreshBtn);
+            statusLabel = new Label { Text = "Готов", AutoSize = true, ForeColor = Color.Gray };
+            topPanel.Controls.Add(statusLabel);
+            Controls.Add(topPanel);
+            
+            // Таблица курсов
+            ratesGrid = new DataGridView { Dock = DockStyle.Left, Width = 350, AllowUserToAddRows = false, ReadOnly = true, AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill };
+            ratesGrid.Columns.Add("Currency", "Валюта");
+            ratesGrid.Columns.Add("Rate", "Курс");
+            Controls.Add(ratesGrid);
+            
+            // Панель конвертера
+            var convertPanel = new Panel { Dock = DockStyle.Fill, Padding = new Padding(20) };
+            convertPanel.Controls.Add(new Label { Text = "💱 Конвертер валют", Font = new Font("Arial", 12, FontStyle.Bold), Location = new Point(10, 10), AutoSize = true });
+            convertPanel.Controls.Add(new Label { Text = "Сумма:", Location = new Point(10, 50), AutoSize = true });
+            amountBox = new TextBox { Location = new Point(80, 47), Width = 120 };
+            convertPanel.Controls.Add(amountBox);
+            convertPanel.Controls.Add(new Label { Text = "Из:", Location = new Point(10, 90), AutoSize = true });
+            fromBox = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Location = new Point(80, 87), Width = 100 };
+            convertPanel.Controls.Add(fromBox);
+            convertPanel.Controls.Add(new Label { Text = "В:", Location = new Point(10, 130), AutoSize = true });
+            toBox = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Location = new Point(80, 127), Width = 100 };
+            convertPanel.Controls.Add(toBox);
+            convertBtn = new Button { Text = "Перевести", Location = new Point(80, 170), Width = 100 };
+            convertBtn.Click += (s, e) => ConvertCurrency();
+            convertPanel.Controls.Add(convertBtn);
+            resultBox = new TextBox { Location = new Point(10, 210), Width = 250, ReadOnly = true };
+            convertPanel.Controls.Add(resultBox);
+            Controls.Add(convertPanel);
+        }
+        
+        private async void LoadRates()
+        {
+            currentBase = baseCombo.SelectedItem?.ToString() ?? "USD";
+            statusLabel.Text = "Загрузка...";
+            using var client = new HttpClient();
+            try
+            {
+                var response = await client.GetStringAsync(apiUrl + currentBase);
+                var json = JObject.Parse(response);
+                if (json["result"]?.ToString() == "success")
+                {
+                    currentRates = json["rates"] as JObject;
+                    statusLabel.Text = $"✅ Обновлено: {json["time_last_update_utc"]}";
+                    UpdateTable();
+                    UpdateCombos();
+                }
+                else
+                {
+                    statusLabel.Text = "❌ Ошибка API";
+                }
+            }
+            catch (Exception ex)
+            {
+                statusLabel.Text = $"❌ Ошибка: {ex.Message}";
+            }
+        }
+        
+        private void UpdateTable()
+        {
+            ratesGrid.Rows.Clear();
+            string[] currencies = { "USD", "EUR", "GBP", "JPY", "CNY", "RUB", "CAD", "AUD", "CHF", "BTC" };
+            foreach (var curr in currencies)
+            {
+                if (curr == currentBase)
+                {
+                    ratesGrid.Rows.Add(curr, "1.0000");
+                }
+                else if (currentRates != null && currentRates[curr] != null)
+                {
+                    double rate = (double)currentRates[curr];
+                    ratesGrid.Rows.Add(curr, rate.ToString("F4"));
+                }
+            }
+        }
+        
+        private void UpdateCombos()
+        {
+            fromBox.Items.Clear();
+            toBox.Items.Clear();
+            string[] currencies = { "USD", "EUR", "GBP", "JPY", "CNY", "RUB", "CAD", "AUD", "CHF", "BTC" };
+            foreach (var curr in currencies)
+            {
+                fromBox.Items.Add(curr);
+                toBox.Items.Add(curr);
+            }
+            fromBox.SelectedIndex = 0;
+            toBox.SelectedIndex = 1;
+        }
+        
+        private void ConvertCurrency()
+        {
+            if (currentRates == null) { resultBox.Text = "Данные не загружены"; return; }
+            if (!double.TryParse(amountBox.Text, out double amount)) { resultBox.Text = "Неверная сумма"; return; }
+            string from = fromBox.SelectedItem?.ToString();
+            string to = toBox.SelectedItem?.ToString();
+            double fromRate = from == currentBase ? 1.0 : (double?)currentRates[from] ?? 1.0;
+            double toRate = to == currentBase ? 1.0 : (double?)currentRates[to] ?? 1.0;
+            double result = amount * toRate / fromRate;
+            resultBox.Text = $"{amount:F2} {from} = {result:F4} {to}";
+        }
+        
+        [STAThread]
+        static void Main()
+        {
+            Application.EnableVisualStyles();
+            Application.Run(new MainForm());
+        }
+    }
+}
