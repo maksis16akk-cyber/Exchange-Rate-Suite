@@ -1,0 +1,159 @@
+<?php
+// exchange.php - Курсы валют на PHP (серверный рендеринг + кэширование)
+// Атрибуция: Данные предоставлены Exchange Rate API
+
+session_start();
+
+$apiUrl = "https://open.er-api.com/v6/latest/";
+$cacheFile = "exchange_cache.json";
+$cacheTime = 3600; // 1 час
+
+function fetchRates($base) {
+    global $apiUrl;
+    $url = $apiUrl . $base;
+    $ch = curl_init($url);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+    $response = curl_exec($ch);
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+    if ($httpCode == 200) {
+        $data = json_decode($response, true);
+        if ($data['result'] == 'success') {
+            return $data;
+        }
+    }
+    return null;
+}
+
+function getRates($base) {
+    global $cacheFile, $cacheTime;
+    if (file_exists($cacheFile) && (time() - filemtime($cacheFile) < $cacheTime)) {
+        $cached = json_decode(file_get_contents($cacheFile), true);
+        if ($cached['base'] == $base) {
+            return $cached['data'];
+        }
+    }
+    $data = fetchRates($base);
+    if ($data) {
+        file_put_contents($cacheFile, json_encode(['base' => $base, 'data' => $data]));
+    }
+    return $data;
+}
+
+$base = $_GET['base'] ?? $_SESSION['base'] ?? 'USD';
+$data = getRates($base);
+$rates = $data['rates'] ?? [];
+$updateTime = $data['time_last_update_utc'] ?? 'неизвестно';
+$currentBase = $data['base_code'] ?? $base;
+$_SESSION['base'] = $currentBase;
+
+$result = null;
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['convert'])) {
+    $amount = floatval($_POST['amount']);
+    $from = strtoupper($_POST['from']);
+    $to = strtoupper($_POST['to']);
+    if ($rates && isset($rates[$from]) && isset($rates[$to])) {
+        $fromRate = $rates[$from];
+        $toRate = $rates[$to];
+        $converted = $amount * $toRate / $fromRate;
+        $result = sprintf("%.2f %s = %.4f %s", $amount, $from, $converted, $to);
+    } else {
+        $result = "Ошибка конвертации";
+    }
+}
+?>
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>💱 Курсы валют онлайн (PHP)</title>
+    <style>
+        * { box-sizing: border-box; font-family: 'Segoe UI', system-ui; }
+        body { background: linear-gradient(135deg, #1e3c72, #2a5298); margin: 0; padding: 20px; min-height: 100vh; }
+        .container { max-width: 1200px; margin: 0 auto; background: white; border-radius: 32px; overflow: hidden; box-shadow: 0 20px 35px rgba(0,0,0,0.2); }
+        .header { background: #2c3e50; color: white; padding: 20px 30px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 15px; }
+        .header h1 { margin: 0; }
+        .controls select, .controls button { padding: 8px 16px; border-radius: 40px; border: none; }
+        .controls button { background: #3498db; color: white; cursor: pointer; }
+        .main { display: flex; flex-wrap: wrap; }
+        .rates-section { flex: 1; min-width: 350px; padding: 20px; border-right: 1px solid #e0e0e0; }
+        .rates-table { width: 100%; border-collapse: collapse; }
+        .rates-table th, .rates-table td { padding: 10px; text-align: left; border-bottom: 1px solid #eee; }
+        .rates-table th { background: #f5f5f5; }
+        .converter { background: #ecf0f1; border-radius: 20px; padding: 20px; margin-top: 20px; }
+        .converter input, .converter select { padding: 8px; border-radius: 20px; border: 1px solid #ccc; margin: 5px; }
+        .converter button { background: #2ecc71; color: white; border: none; padding: 8px 20px; border-radius: 20px; cursor: pointer; }
+        .status { margin-top: 15px; font-size: 12px; color: #7f8c8d; }
+        .attribution { font-size: 11px; opacity: 0.7; margin-top: 15px; }
+        .result { margin-top: 15px; padding: 10px; background: #d5f5e3; border-radius: 10px; font-weight: bold; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="header">
+        <h1>💱 Курсы валют онлайн</h1>
+        <div class="controls">
+            <label>Базовая валюта:</label>
+            <select id="baseSelect" onchange="changeBase(this.value)">
+                <option value="USD" <?= $currentBase == 'USD' ? 'selected' : '' ?>>USD</option>
+                <option value="EUR" <?= $currentBase == 'EUR' ? 'selected' : '' ?>>EUR</option>
+                <option value="GBP" <?= $currentBase == 'GBP' ? 'selected' : '' ?>>GBP</option>
+                <option value="JPY" <?= $currentBase == 'JPY' ? 'selected' : '' ?>>JPY</option>
+                <option value="CNY" <?= $currentBase == 'CNY' ? 'selected' : '' ?>>CNY</option>
+                <option value="RUB" <?= $currentBase == 'RUB' ? 'selected' : '' ?>>RUB</option>
+                <option value="BTC" <?= $currentBase == 'BTC' ? 'selected' : '' ?>>BTC</option>
+            </select>
+            <button onclick="window.location.reload()">🔄 Обновить</button>
+        </div>
+    </div>
+    <div class="main">
+        <div class="rates-section">
+            <h3>📊 Текущие курсы</h3>
+            <table class="rates-table">
+                <thead><tr><th>Валюта</th><th>Курс</th></tr></thead>
+                <tbody>
+                    <?php
+                    $displayCurrencies = ['USD','EUR','GBP','JPY','CNY','RUB','CAD','AUD','CHF','BTC'];
+                    foreach ($displayCurrencies as $curr):
+                        if ($curr == $currentBase):
+                    ?>
+                        <tr><td><strong><?= $curr ?></strong></td><td>1.0000</td></tr>
+                    <?php elseif (isset($rates[$curr])): ?>
+                        <tr><td><strong><?= $curr ?></strong></td><td><?= number_format($rates[$curr], 4, '.', '') ?></td></tr>
+                    <?php endif; endforeach; ?>
+                </tbody>
+            </table>
+            <div class="status">🕒 Обновлено: <?= htmlspecialchars($updateTime) ?></div>
+            <div class="converter">
+                <h4>💱 Конвертер валют</h4>
+                <form method="POST">
+                    <input type="number" name="amount" step="any" value="1" required style="width:120px">
+                    <select name="from">
+                        <option value="USD">USD</option><option value="EUR">EUR</option>
+                        <option value="GBP">GBP</option><option value="JPY">JPY</option>
+                        <option value="CNY">CNY</option><option value="RUB">RUB</option>
+                    </select>
+                    <span>→</span>
+                    <select name="to">
+                        <option value="EUR">EUR</option><option value="USD">USD</option>
+                        <option value="GBP">GBP</option><option value="JPY">JPY</option>
+                    </select>
+                    <button type="submit" name="convert">Перевести</button>
+                </form>
+                <?php if ($result): ?>
+                    <div class="result"><?= $result ?></div>
+                <?php endif; ?>
+            </div>
+            <div class="attribution">📊 Данные предоставлены <a href="https://www.exchangerate-api.com" target="_blank">Exchange Rate API</a></div>
+        </div>
+    </div>
+</div>
+<script>
+    function changeBase(base) {
+        window.location.href = '?base=' + base;
+    }
+</script>
+</body>
+</html>
