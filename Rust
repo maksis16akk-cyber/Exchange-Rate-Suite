@@ -1,0 +1,113 @@
+// exchange.rs - Курсы валют на Rust (CLI с цветной таблицей)
+// Зависимости в Cargo.toml:
+// [dependencies]
+// reqwest = { version = "0.11", features = ["json"] }
+// serde = { version = "1.0", features = ["derive"] }
+// serde_json = "1.0"
+// colored = "2.0"
+// tokio = { version = "1", features = ["full"] }
+
+use colored::*;
+use serde::Deserialize;
+use std::collections::HashMap;
+use std::io;
+
+#[derive(Deserialize)]
+struct ApiResponse {
+    result: String,
+    base_code: String,
+    rates: HashMap<String, f64>,
+    time_last_update_utc: String,
+}
+
+const API_URL: &str = "https://open.er-api.com/v6/latest/";
+
+async fn fetch_rates(base: &str) -> Result<ApiResponse, Box<dyn std::error::Error>> {
+    let url = format!("{}{}", API_URL, base);
+    let resp = reqwest::get(&url).await?;
+    let data: ApiResponse = resp.json().await?;
+    if data.result != "success" {
+        return Err("API error".into());
+    }
+    Ok(data)
+}
+
+fn display_rates(rates: &HashMap<String, f64>, base: &str, symbols: &[&str]) {
+    println!("\n{}", "═".repeat(60));
+    println!("{}", format!("📊 КУРСЫ ВАЛЮТ ОТНОСИТЕЛЬНО {}", base).bright_cyan());
+    println!("{}", "═".repeat(60));
+    for &curr in symbols {
+        if curr == base {
+            println!("{}: {:.4}", curr.bold(), 1.0);
+        } else if let Some(&rate) = rates.get(curr) {
+            let color = if curr == "USD" { "green" } else { "white" };
+            println!("{}: {:.4}", curr.color(color), rate);
+        } else {
+            println!("{}: {}", curr.red(), "нет данных");
+        }
+    }
+    println!("{}", "═".repeat(60));
+}
+
+fn convert_currency(rates: &HashMap<String, f64>, from: &str, to: &str, amount: f64) -> Option<f64> {
+    let from_rate = rates.get(from)?;
+    let to_rate = rates.get(to)?;
+    Some(amount * to_rate / from_rate)
+}
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    println!("{}", "💱 КУРСЫ ВАЛЮТ ОНЛАЙН (Rust)".bright_blue());
+    println!("{}", "Атрибуция: Данные предоставлены Exchange Rate API".dimmed());
+    let mut base = "USD".to_string();
+    let symbols = vec!["USD", "EUR", "GBP", "JPY", "CNY", "RUB", "CAD", "AUD", "CHF", "BTC"];
+    loop {
+        println!("\nВыберите действие:");
+        println!("1. Показать курсы");
+        println!("2. Конвертировать");
+        println!("3. Сменить базовую валюту");
+        println!("0. Выход");
+        let mut choice = String::new();
+        io::stdin().read_line(&mut choice)?;
+        match choice.trim() {
+            "0" => break,
+            "1" => {
+                match fetch_rates(&base).await {
+                    Ok(data) => {
+                        display_rates(&data.rates, &data.base_code, &symbols);
+                    }
+                    Err(e) => println!("{} {}", "❌".red(), e),
+                }
+            }
+            "2" => {
+                let rates_data = fetch_rates(&base).await?;
+                print!("Из валюты (например USD): ");
+                let mut from = String::new();
+                io::stdin().read_line(&mut from)?;
+                let from = from.trim().to_uppercase();
+                print!("В валюту: ");
+                let mut to = String::new();
+                io::stdin().read_line(&mut to)?;
+                let to = to.trim().to_uppercase();
+                print!("Сумма: ");
+                let mut amount_str = String::new();
+                io::stdin().read_line(&mut amount_str)?;
+                let amount: f64 = amount_str.trim().parse().unwrap_or(0.0);
+                if let Some(result) = convert_currency(&rates_data.rates, &from, &to, amount) {
+                    println!("{} {} = {:.4} {}", amount, from, result, to);
+                } else {
+                    println!("❌ Ошибка конвертации");
+                }
+            }
+            "3" => {
+                print!("Новая базовая валюта: ");
+                let mut new_base = String::new();
+                io::stdin().read_line(&mut new_base)?;
+                base = new_base.trim().to_uppercase();
+                println!("✅ Базовая валюта изменена на {}", base);
+            }
+            _ => println!("Неверный выбор"),
+        }
+    }
+    Ok(())
+}
