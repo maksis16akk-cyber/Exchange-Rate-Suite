@@ -1,0 +1,433 @@
+<!-- exchange.html - Курсы валют на JavaScript (веб-приложение с графиками) -->
+<!-- Атрибуция: Данные предоставлены Exchange Rate API -->
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>💱 Курсы валют онлайн</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+        }
+        body {
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            margin: 0;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: rgba(255,255,255,0.95);
+            border-radius: 32px;
+            overflow: hidden;
+            box-shadow: 0 25px 50px -12px rgba(0,0,0,0.25);
+        }
+        .header {
+            background: #2c3e50;
+            color: white;
+            padding: 20px 30px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+        .header h1 {
+            margin: 0;
+            font-size: 1.8rem;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .controls {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        select, input, button {
+            padding: 8px 16px;
+            border-radius: 40px;
+            border: none;
+            font-size: 14px;
+        }
+        button {
+            background: #3498db;
+            color: white;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        button:hover {
+            background: #2980b9;
+            transform: translateY(-1px);
+        }
+        .attribution {
+            font-size: 11px;
+            opacity: 0.7;
+        }
+        .main {
+            display: flex;
+            flex-wrap: wrap;
+        }
+        .rates-panel {
+            flex: 1;
+            min-width: 350px;
+            padding: 20px;
+            border-right: 1px solid #e0e0e0;
+        }
+        .chart-panel {
+            flex: 1.5;
+            min-width: 400px;
+            padding: 20px;
+            background: #fafafa;
+        }
+        .rates-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 15px;
+        }
+        .rates-table th, .rates-table td {
+            padding: 10px 8px;
+            text-align: left;
+            border-bottom: 1px solid #eee;
+        }
+        .rates-table th {
+            background: #f5f5f5;
+            font-weight: 600;
+        }
+        .rates-table tr:hover {
+            background: #f0f0f0;
+        }
+        .favorite-star {
+            cursor: pointer;
+            font-size: 18px;
+            user-select: none;
+        }
+        .positive {
+            color: #2ecc71;
+        }
+        .negative {
+            color: #e74c3c;
+        }
+        .converter {
+            background: #ecf0f1;
+            border-radius: 20px;
+            padding: 15px;
+            margin-top: 20px;
+        }
+        .converter input, .converter select {
+            background: white;
+            border: 1px solid #ccc;
+            margin: 5px;
+        }
+        .status {
+            margin-top: 15px;
+            font-size: 12px;
+            color: #7f8c8d;
+        }
+        @media (max-width: 768px) {
+            .main { flex-direction: column; }
+            .rates-panel { border-right: none; }
+        }
+    </style>
+    <!-- Chart.js для графиков -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+<div class="container">
+    <div class="header">
+        <h1>💱 Курсы валют онлайн</h1>
+        <div class="controls">
+            <span>Базовая валюта:</span>
+            <select id="baseCurrency">
+                <option value="USD">USD - Доллар США</option>
+                <option value="EUR">EUR - Евро</option>
+                <option value="GBP">GBP - Фунт стерлингов</option>
+                <option value="JPY">JPY - Японская иена</option>
+                <option value="CNY">CNY - Китайский юань</option>
+                <option value="RUB">RUB - Российский рубль</option>
+                <option value="BTC">BTC - Биткоин</option>
+            </select>
+            <button id="refreshBtn">🔄 Обновить</button>
+            <button id="autoRefreshBtn">⏱️ Автообновление</button>
+        </div>
+    </div>
+    <div class="main">
+        <div class="rates-panel">
+            <h3>📊 Текущие курсы</h3>
+            <input type="text" id="searchInput" placeholder="🔍 Поиск валюты..." style="width:100%; margin-bottom:15px">
+            <div style="max-height: 500px; overflow-y: auto;">
+                <table class="rates-table" id="ratesTable">
+                    <thead>
+                        <tr><th>Валюта</th><th>Курс</th><th>Изменение %</th><th>⭐</th></tr>
+                    </thead>
+                    <tbody id="ratesBody"></tbody>
+                </table>
+            </div>
+            <div class="converter">
+                <h4>💱 Конвертер валют</h4>
+                <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                    <input type="number" id="convertAmount" value="1" step="any" style="width:120px">
+                    <select id="convertFrom">
+                        <option value="USD">USD</option>
+                        <option value="EUR">EUR</option>
+                    </select>
+                    <span>→</span>
+                    <select id="convertTo">
+                        <option value="EUR">EUR</option>
+                        <option value="USD">USD</option>
+                    </select>
+                    <button id="convertBtn">Перевести</button>
+                </div>
+                <div id="convertResult" style="margin-top: 10px; font-weight: bold;"></div>
+            </div>
+            <div class="status" id="statusMsg">Загрузка данных...</div>
+            <div class="attribution" style="margin-top:15px;">
+                📊 Данные предоставлены <a href="https://www.exchangerate-api.com" target="_blank">Exchange Rate API</a>
+            </div>
+        </div>
+        <div class="chart-panel">
+            <h3>📈 Динамика курса</h3>
+            <div style="margin-bottom: 15px;">
+                <select id="chartCurrency">
+                    <option value="EUR">EUR</option>
+                    <option value="GBP">GBP</option>
+                    <option value="JPY">JPY</option>
+                    <option value="CNY">CNY</option>
+                    <option value="RUB">RUB</option>
+                </select>
+                <select id="chartPeriod">
+                    <option value="7">7 дней</option>
+                    <option value="14">14 дней</option>
+                    <option value="30">30 дней</option>
+                </select>
+                <button id="updateChartBtn">Построить график</button>
+            </div>
+            <canvas id="rateChart" width="400" height="300" style="max-width:100%; height:auto;"></canvas>
+            <p id="chartInfo" style="margin-top: 10px; font-size: 12px; color: #666;"></p>
+        </div>
+    </div>
+</div>
+<script>
+    // --- Конфигурация ---
+    const API_URL = "https://open.er-api.com/v6/latest/";
+    let currentRates = {};
+    let currentBase = "USD";
+    let chartInstance = null;
+    let autoRefreshInterval = null;
+    let favorites = JSON.parse(localStorage.getItem('favorites')) || ["USD", "EUR", "GBP", "JPY", "RUB"];
+    
+    // --- Вспомогательные функции ---
+    function saveFavorites() {
+        localStorage.setItem('favorites', JSON.stringify(favorites));
+        renderRatesTable();
+    }
+    
+    function toggleFavorite(currency) {
+        if (favorites.includes(currency)) {
+            favorites = favorites.filter(c => c !== currency);
+        } else {
+            favorites.push(currency);
+        }
+        saveFavorites();
+    }
+    
+    // --- Основной запрос курсов ---
+    async function fetchRates(base = "USD") {
+        const url = `${API_URL}${base}`;
+        try {
+            const response = await fetch(url);
+            const data = await response.json();
+            if (data.result === "success") {
+                currentRates = data.rates;
+                currentBase = base;
+                document.getElementById("statusMsg").innerHTML = `🕒 Обновлено: ${new Date().toLocaleString()} | База: ${base}`;
+                renderRatesTable();
+                return currentRates;
+            } else {
+                document.getElementById("statusMsg").innerHTML = "❌ Ошибка загрузки данных";
+                return null;
+            }
+        } catch (error) {
+            document.getElementById("statusMsg").innerHTML = `❌ Ошибка сети: ${error.message}`;
+            return null;
+        }
+    }
+    
+    // --- Отображение таблицы курсов ---
+    function renderRatesTable() {
+        const searchTerm = document.getElementById("searchInput").value.toLowerCase();
+        const tbody = document.getElementById("ratesBody");
+        tbody.innerHTML = "";
+        
+        // Определяем порядок: сначала избранные, затем остальные по алфавиту
+        const allCurrencies = Object.keys(currentRates).filter(c => !c.startsWith('_'));
+        const sorted = [...allCurrencies].sort((a, b) => {
+            const aFav = favorites.includes(a);
+            const bFav = favorites.includes(b);
+            if (aFav && !bFav) return -1;
+            if (!aFav && bFav) return 1;
+            return a.localeCompare(b);
+        });
+        
+        for (const currency of sorted) {
+            if (searchTerm && !currency.toLowerCase().includes(searchTerm)) continue;
+            const rate = currentRates[currency];
+            const isFavorite = favorites.includes(currency);
+            const changePercent = Math.random() * 6 - 3; // Заглушка для демонстрации
+            const changeClass = changePercent >= 0 ? "positive" : "negative";
+            const changeSymbol = changePercent >= 0 ? "▲" : "▼";
+            
+            const row = tbody.insertRow();
+            row.insertCell(0).innerHTML = `<strong>${currency}</strong>`;
+            row.insertCell(1).innerHTML = `<strong>${rate.toFixed(4)}</strong>`;
+            row.insertCell(2).innerHTML = `<span class="${changeClass}">${changeSymbol} ${Math.abs(changePercent).toFixed(2)}%</span>`;
+            row.insertCell(3).innerHTML = `<span class="favorite-star" data-currency="${currency}">${isFavorite ? "★" : "☆"}</span>`;
+        }
+        
+        // Добавляем обработчики для звездочек
+        document.querySelectorAll('.favorite-star').forEach(star => {
+            star.addEventListener('click', (e) => {
+                const currency = star.dataset.currency;
+                toggleFavorite(currency);
+                star.innerHTML = favorites.includes(currency) ? "★" : "☆";
+            });
+        });
+    }
+    
+    // --- Конвертер валют ---
+    function convertCurrency(amount, fromCurr, toCurr) {
+        if (!currentRates[fromCurr] || !currentRates[toCurr]) {
+            return null;
+        }
+        // Конвертация: amount * (курс to / курс from)
+        const result = amount * (currentRates[toCurr] / currentRates[fromCurr]);
+        return result;
+    }
+    
+    function updateConverter() {
+        const amount = parseFloat(document.getElementById("convertAmount").value);
+        const fromCurr = document.getElementById("convertFrom").value;
+        const toCurr = document.getElementById("convertTo").value;
+        if (isNaN(amount)) return;
+        const result = convertCurrency(amount, fromCurr, toCurr);
+        if (result !== null) {
+            document.getElementById("convertResult").innerHTML = `${amount.toFixed(2)} ${fromCurr} = ${result.toFixed(4)} ${toCurr}`;
+        } else {
+            document.getElementById("convertResult").innerHTML = "Ошибка конвертации";
+        }
+    }
+    
+    // --- Загрузка исторических данных для графика ---
+    // Примечание: для полноценной истории нужен API с историческими данными или эмуляция
+    async function loadHistoricalData(currency, days) {
+        // Эмуляция исторических данных на основе текущего курса с небольшим шумом
+        const currentRate = currentRates[currency];
+        if (!currentRate) return null;
+        const labels = [];
+        const data = [];
+        for (let i = days; i >= 0; i--) {
+            const date = new Date();
+            date.setDate(date.getDate() - i);
+            labels.push(date.toLocaleDateString());
+            // Эмуляция изменения курса
+            const variation = (Math.random() - 0.5) * 0.1;
+            const emulatedRate = currentRate * (1 + variation * (i / days));
+            data.push(emulatedRate);
+        }
+        return { labels, data };
+    }
+    
+    async function updateChart() {
+        const currency = document.getElementById("chartCurrency").value;
+        const days = parseInt(document.getElementById("chartPeriod").value);
+        const historical = await loadHistoricalData(currency, days);
+        if (!historical) {
+            document.getElementById("chartInfo").innerHTML = "Не удалось загрузить данные";
+            return;
+        }
+        if (chartInstance) {
+            chartInstance.destroy();
+        }
+        const ctx = document.getElementById("rateChart").getContext("2d");
+        chartInstance = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: historical.labels,
+                datasets: [{
+                    label: `${currency} / ${currentBase}`,
+                    data: historical.data,
+                    borderColor: 'rgb(52, 152, 219)',
+                    backgroundColor: 'rgba(52, 152, 219, 0.1)',
+                    tension: 0.3,
+                    fill: true
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: true,
+                plugins: {
+                    tooltip: {
+                        callbacks: {
+                            label: (context) => `${context.raw.toFixed(4)}`
+                        }
+                    }
+                }
+            }
+        });
+        document.getElementById("chartInfo").innerHTML = `Курс ${currency} к ${currentBase} за последние ${days} дней (эмуляция)`;
+    }
+    
+    // --- Автообновление ---
+    function startAutoRefresh() {
+        if (autoRefreshInterval) clearInterval(autoRefreshInterval);
+        autoRefreshInterval = setInterval(async () => {
+            await fetchRates(currentBase);
+        }, 60000); // каждую минуту
+        alert("Автообновление включено (каждую минуту)");
+    }
+    
+    function stopAutoRefresh() {
+        if (autoRefreshInterval) {
+            clearInterval(autoRefreshInterval);
+            autoRefreshInterval = null;
+            alert("Автообновление выключено");
+        }
+    }
+    
+    // --- Инициализация ---
+    async function init() {
+        await fetchRates("USD");
+        initEventListeners();
+        updateChart();
+    }
+    
+    function initEventListeners() {
+        document.getElementById("refreshBtn").addEventListener("click", async () => {
+            await fetchRates(currentBase);
+        });
+        document.getElementById("autoRefreshBtn").addEventListener("click", () => {
+            if (autoRefreshInterval) {
+                stopAutoRefresh();
+            } else {
+                startAutoRefresh();
+            }
+        });
+        document.getElementById("baseCurrency").addEventListener("change", async (e) => {
+            await fetchRates(e.target.value);
+        });
+        document.getElementById("convertBtn").addEventListener("click", updateConverter);
+        document.getElementById("convertAmount").addEventListener("input", updateConverter);
+        document.getElementById("convertFrom").addEventListener("change", updateConverter);
+        document.getElementById("convertTo").addEventListener("change", updateConverter);
+        document.getElementById("searchInput").addEventListener("input", renderRatesTable);
+        document.getElementById("updateChartBtn").addEventListener("click", updateChart);
+    }
+    
+    init();
+</script>
+</body>
+</html>
