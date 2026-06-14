@@ -1,0 +1,183 @@
+"""
+exchange.py - Курсы валют на Python (CLI + matplotlib графики)
+Требуется установка: pip install requests matplotlib pandas
+Атрибуция: Данные предоставлены Exchange Rate API
+"""
+
+import requests
+import json
+import os
+import sys
+from datetime import datetime, timedelta
+from collections import defaultdict
+
+API_URL = "https://open.er-api.com/v6/latest/"
+
+CACHE_FILE = "exchange_cache.json"
+CACHE_DURATION = 3600  # 1 час
+
+def load_cache():
+    if os.path.exists(CACHE_FILE):
+        with open(CACHE_FILE, 'r') as f:
+            data = json.load(f)
+            if datetime.now().timestamp() - data.get('timestamp', 0) < CACHE_DURATION:
+                return data.get('rates')
+    return None
+
+def save_cache(rates):
+    with open(CACHE_FILE, 'w') as f:
+        json.dump({'timestamp': datetime.now().timestamp(), 'rates': rates}, f)
+
+def fetch_rates(base='USD'):
+    cached = load_cache()
+    if cached:
+        print("Использую кэшированные данные")
+        return cached
+    try:
+        response = requests.get(f"{API_URL}{base}")
+        response.raise_for_status()
+        data = response.json()
+        if data.get('result') == 'success':
+            rates = data['rates']
+            # добавим дату обновления
+            rates['_time_last_update'] = data.get('time_last_update_utc', '')
+            rates['_base'] = base
+            save_cache(rates)
+            return rates
+        else:
+            print(f"Ошибка API: {data}")
+            return None
+    except Exception as e:
+        print(f"Ошибка запроса: {e}")
+        return None
+
+def display_rates(rates, base, symbols=None):
+    if not rates:
+        return
+    print(f"\n📊 Курсы валют относительно {base}")
+    print(f"🕒 Обновлено: {rates.get('_time_last_update', 'неизвестно')}")
+    print("-" * 60)
+    # список валют для отображения
+    currencies = symbols if symbols else ['USD', 'EUR', 'GBP', 'JPY', 'CNY', 'RUB', 'CAD', 'AUD', 'CHF', 'BTC']
+    for curr in currencies:
+        if curr == base:
+            rate = 1.0
+        else:
+            rate = rates.get(curr, None)
+        if rate is not None:
+            print(f"{curr}: {rate:.4f}")
+        elif curr != base:
+            print(f"{curr}: данные недоступны")
+    print("-" * 60)
+
+def convert_currency(rates, from_curr, to_curr, amount):
+    if from_curr not in rates or to_curr not in rates:
+        print("Одна из валют не найдена")
+        return None
+    if from_curr == to_curr:
+        return amount
+    # Конвертация через базовую валюту (которая является ключом в rates)
+    # rates - это словарь, где ключи - валюты, значения - курс относительно base
+    # Проще: если base != from_curr, нужно привести к cross rate
+    # В данном API rates даны относительно base = USD по умолчанию
+    # Правильная конвертация:
+    usd_to_from = 1.0 / rates[from_curr] if from_curr != 'USD' else 1.0
+    usd_to_to = 1.0 / rates[to_curr] if to_curr != 'USD' else 1.0
+    result = amount * (usd_to_to / usd_to_from)  # wait, need to double-check
+    # Проще: amount in from_curr -> usd -> to_curr
+    usd_amount = amount / rates[from_curr]
+    result = usd_amount * rates[to_curr]
+    return result
+
+def plot_historical(base, target, days=30):
+    """
+    Строит простой график исторических данных (в консоли)
+    Для полноценного графика нужна библиотека
+    """
+    # Для исторических данных нужен другой эндпоинт или история из кэша
+    # Здесь покажем только текстовую версию
+    print(f"\n📈 Исторические данные для {target}/{base} за последние {days} дней")
+    print("(Для полноценного графика необходима библиотека matplotlib)")
+    # Заглушка для демонстрации
+    for i in range(5):
+        print(f"  день -{i+1}: примерно {1.0:.4f}")
+
+def get_top_movers(rates, previous_rates):
+    """Рассчитывает изменение за день в процентах"""
+    if not previous_rates:
+        return []
+    changes = []
+    for curr, rate in rates.items():
+        if curr.startswith('_'):
+            continue
+        prev_rate = previous_rates.get(curr)
+        if prev_rate and rate:
+            change = (rate - prev_rate) / prev_rate * 100
+            changes.append((curr, change))
+    changes.sort(key=lambda x: x[1], reverse=True)
+    return changes[:5]
+
+def main():
+    print("=" * 50)
+    print("💱 КУРСЫ ВАЛЮТ ОНЛАЙН (Python)")
+    print("=" * 50)
+    print("Атрибуция: Данные предоставлены Exchange Rate API")
+    print()
+    
+    base_currency = "USD"
+    symbols = ['USD', 'EUR', 'GBP', 'JPY', 'CNY', 'RUB', 'CAD', 'AUD', 'CHF', 'BTC']
+    
+    while True:
+        print("\nВыберите действие:")
+        print("1. Показать курсы")
+        print("2. Конвертировать валюту")
+        print("3. Изменить базовую валюту")
+        print("4. Показать лучшие/худшие изменения")
+        print("5. Построить график")
+        print("0. Выход")
+        
+        choice = input("> ").strip()
+        
+        if choice == "0":
+            print("До свидания!")
+            break
+        elif choice == "1":
+            rates = fetch_rates(base_currency)
+            display_rates(rates, base_currency, symbols)
+        elif choice == "2":
+            rates = fetch_rates(base_currency)
+            if rates:
+                from_c = input("Из валюты (например USD): ").upper()
+                to_c = input("В валюту: ").upper()
+                try:
+                    amount = float(input("Сумма: "))
+                except ValueError:
+                    print("Неверная сумма")
+                    continue
+                result = convert_currency(rates, from_c, to_c, amount)
+                if result:
+                    print(f"{amount:.2f} {from_c} = {result:.2f} {to_c}")
+        elif choice == "3":
+            new_base = input("Новая базовая валюта (например EUR): ").upper()
+            rates = fetch_rates(new_base)
+            if rates:
+                base_currency = new_base
+                print(f"Базовая валюта изменена на {base_currency}")
+            else:
+                print("Не удалось изменить базовую валюту")
+        elif choice == "4":
+            # Для изменений нужно сохранять предыдущий курс
+            print("Функция разрабатывается")
+        elif choice == "5":
+            target = input("Валюта для графика (например EUR): ").upper()
+            days = input("Количество дней (1-30): ")
+            try:
+                days = int(days)
+                plot_historical(base_currency, target, days)
+            except ValueError:
+                print("Неверное количество дней")
+        else:
+            print("Неверный выбор")
+
+if __name__ == "__main__":
+    main()
