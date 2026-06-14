@@ -1,0 +1,160 @@
+// ExchangeApp.java - Курсы валют на Java Swing
+// Атрибуция: Данные предоставлены Exchange Rate API
+import javax.swing.*;
+import javax.swing.table.DefaultTableModel;
+import java.awt.*;
+import java.awt.event.*;
+import java.net.http.*;
+import java.net.URI;
+import java.io.*;
+import org.json.*;
+
+public class ExchangeApp extends JFrame {
+    private JTable ratesTable;
+    private DefaultTableModel tableModel;
+    private JComboBox<String> baseCombo;
+    private JTextField amountField, resultField;
+    private JComboBox<String> fromCombo, toCombo;
+    private JLabel statusLabel;
+    private String apiUrl = "https://open.er-api.com/v6/latest/";
+    private JSONObject currentRates;
+    private String currentBase = "USD";
+    
+    public ExchangeApp() {
+        setTitle("💱 Курсы валют онлайн");
+        setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+        setSize(900, 600);
+        setLocationRelativeTo(null);
+        setLayout(new BorderLayout(10,10));
+        
+        // Верхняя панель
+        JPanel topPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        topPanel.add(new JLabel("Базовая валюта:"));
+        baseCombo = new JComboBox<>(new String[]{"USD", "EUR", "GBP", "JPY", "CNY", "RUB", "BTC"});
+        baseCombo.addActionListener(e -> loadRates());
+        topPanel.add(baseCombo);
+        JButton refreshBtn = new JButton("🔄 Обновить");
+        refreshBtn.addActionListener(e -> loadRates());
+        topPanel.add(refreshBtn);
+        add(topPanel, BorderLayout.NORTH);
+        
+        // Таблица курсов
+        tableModel = new DefaultTableModel(new String[]{"Валюта", "Курс"}, 0);
+        ratesTable = new JTable(tableModel);
+        JScrollPane scrollPane = new JScrollPane(ratesTable);
+        scrollPane.setPreferredSize(new Dimension(400, 400));
+        add(scrollPane, BorderLayout.WEST);
+        
+        // Правая панель - конвертер
+        JPanel rightPanel = new JPanel(new GridBagLayout());
+        rightPanel.setBorder(BorderFactory.createTitledBorder("💱 Конвертер валют"));
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.insets = new Insets(5,5,5,5);
+        gbc.gridx = 0; gbc.gridy = 0;
+        rightPanel.add(new JLabel("Сумма:"), gbc);
+        gbc.gridx = 1;
+        amountField = new JTextField(10);
+        rightPanel.add(amountField, gbc);
+        gbc.gridx = 0; gbc.gridy = 1;
+        rightPanel.add(new JLabel("Из:"), gbc);
+        gbc.gridx = 1;
+        fromCombo = new JComboBox<>();
+        rightPanel.add(fromCombo, gbc);
+        gbc.gridx = 0; gbc.gridy = 2;
+        rightPanel.add(new JLabel("В:"), gbc);
+        gbc.gridx = 1;
+        toCombo = new JComboBox<>();
+        rightPanel.add(toCombo, gbc);
+        gbc.gridx = 0; gbc.gridy = 3;
+        JButton convertBtn = new JButton("Перевести");
+        rightPanel.add(convertBtn, gbc);
+        gbc.gridx = 0; gbc.gridy = 4; gbc.gridwidth = 2;
+        resultField = new JTextField(20);
+        resultField.setEditable(false);
+        rightPanel.add(resultField, gbc);
+        add(rightPanel, BorderLayout.CENTER);
+        
+        // Статус
+        statusLabel = new JLabel("Готов", SwingConstants.CENTER);
+        add(statusLabel, BorderLayout.SOUTH);
+        
+        convertBtn.addActionListener(e -> convertCurrency());
+        loadRates();
+        setVisible(true);
+    }
+    
+    private void loadRates() {
+        currentBase = (String) baseCombo.getSelectedItem();
+        statusLabel.setText("Загрузка данных...");
+        new Thread(() -> {
+            try {
+                HttpClient client = HttpClient.newHttpClient();
+                HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(apiUrl + currentBase))
+                    .build();
+                HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+                if (response.statusCode() == 200) {
+                    JSONObject json = new JSONObject(response.body());
+                    if (json.getString("result").equals("success")) {
+                        currentRates = json.getJSONObject("rates");
+                        SwingUtilities.invokeLater(() -> {
+                            updateTable();
+                            updateCurrencyCombos();
+                            statusLabel.setText("✅ Обновлено: " + json.optString("time_last_update_utc", "неизвестно"));
+                        });
+                    } else {
+                        SwingUtilities.invokeLater(() -> statusLabel.setText("❌ Ошибка API"));
+                    }
+                }
+            } catch (Exception e) {
+                SwingUtilities.invokeLater(() -> statusLabel.setText("❌ Ошибка сети: " + e.getMessage()));
+            }
+        }).start();
+    }
+    
+    private void updateTable() {
+        tableModel.setRowCount(0);
+        String[] mainCurrencies = {"USD", "EUR", "GBP", "JPY", "CNY", "RUB", "CAD", "AUD", "CHF", "BTC"};
+        for (String curr : mainCurrencies) {
+            if (currentRates.has(curr)) {
+                double rate = currentRates.getDouble(curr);
+                tableModel.addRow(new Object[]{curr, String.format("%.4f", rate)});
+            } else if (curr.equals(currentBase)) {
+                tableModel.addRow(new Object[]{curr, "1.0000"});
+            }
+        }
+    }
+    
+    private void updateCurrencyCombos() {
+        fromCombo.removeAllItems();
+        toCombo.removeAllItems();
+        for (String curr : new String[]{"USD", "EUR", "GBP", "JPY", "CNY", "RUB", "CAD", "AUD", "CHF", "BTC"}) {
+            fromCombo.addItem(curr);
+            toCombo.addItem(curr);
+        }
+        fromCombo.setSelectedItem("USD");
+        toCombo.setSelectedItem("EUR");
+    }
+    
+    private void convertCurrency() {
+        try {
+            double amount = Double.parseDouble(amountField.getText());
+            String from = (String) fromCombo.getSelectedItem();
+            String to = (String) toCombo.getSelectedItem();
+            if (currentRates == null) {
+                resultField.setText("Данные не загружены");
+                return;
+            }
+            double fromRate = currentRates.has(from) ? currentRates.getDouble(from) : 1.0;
+            double toRate = currentRates.has(to) ? currentRates.getDouble(to) : 1.0;
+            double result = amount * toRate / fromRate;
+            resultField.setText(String.format("%.2f %s = %.4f %s", amount, from, result, to));
+        } catch (NumberFormatException e) {
+            resultField.setText("Неверная сумма");
+        }
+    }
+    
+    public static void main(String[] args) {
+        SwingUtilities.invokeLater(ExchangeApp::new);
+    }
+}
